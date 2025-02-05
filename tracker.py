@@ -282,10 +282,16 @@ class Tracker:
     def show_file_logs(self, file_name):
         """Display only the peers that hold a given file."""
         if file_name not in self.files_dict:
-            print(f"[Tracker] File '{file_name}' not found.")
+            print(f"[Tracker] Error: File '{file_name}' not found in the network.")
             return
         owners = list(self.files_dict[file_name])
         print(f"File '{file_name}' is held by: {owners}")
+        
+        # Also show any relevant logs for this file
+        print("\nFile-related logs:")
+        for log in self.request_logs:
+            if file_name in log:
+                print(log)
 
 
 if __name__ == "__main__":
