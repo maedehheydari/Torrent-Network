@@ -59,6 +59,12 @@ class Tracker:
         # Main loop for console commands:
         while True:
             try:
+                # Check if running in non-interactive mode (output redirected)
+                if not sys.stdout.isatty():
+                    # Just keep the server running
+                    time.sleep(1)
+                    continue
+                    
                 cmd = input("> ").strip()
                 if cmd == "exit":
                     self.running = False
@@ -78,6 +84,10 @@ class Tracker:
             except KeyboardInterrupt:
                 self.running = False
                 break
+            except EOFError:
+                # Handle EOF in non-interactive mode
+                time.sleep(1)
+                continue
 
         # Cleanup
         self.sock.close()
