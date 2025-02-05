@@ -3,6 +3,7 @@ import threading
 import sys
 import os
 import random
+import time
 
 class Peer:
     def __init__(self, mode, file_name, tracker_addr, listen_addr, peer_name=None):
@@ -36,7 +37,7 @@ class Peer:
 
         self.running = True
 
-        # Launch a thread to handle incoming TCP connections
+        # Launch a thread to handle incoming TCP connections (file uploads)
         threading.Thread(target=self.handle_incoming_connections, daemon=True).start()
 
     def _parse_ip_port(self, addr_str):
@@ -48,15 +49,18 @@ class Peer:
         # 1) Register with the tracker
         self.register_with_tracker()
 
-        # 2) If we're in share mode, announce the file
+        # 2) Start a heartbeat thread to let the tracker know we're alive
+        threading.Thread(target=self.send_heartbeat_loop, daemon=True).start()
+
+        # 3) If we're in share mode, announce the file
         if self.mode == 'share':
             self.share_file()
 
-        # 3) If we're in get mode, request the file
+        # 4) If we're in get mode, request the file
         if self.mode == 'get':
             self.get_file()
 
-        # 4) Keep running until user asks to exit
+        # 5) Keep running until user asks to exit
         print(f"[Peer-{self.peer_name}] Running in {self.mode.upper()} mode.")
         print("Type 'request logs' to see local logs, or 'exit' to stop.\n")
 
@@ -87,6 +91,20 @@ class Peer:
         self.tracker_sock.sendto(msg.encode('utf-8'), (self.tracker_ip, self.tracker_port))
         self.logs.append(f"REGISTER sent: {msg}")
         print(f"[Peer-{self.peer_name}] Connected to Tracker. (REGISTER)")
+
+    def send_heartbeat_loop(self):
+        """
+        Continuously send heartbeat messages to the tracker
+        so it knows this peer is still alive.
+        """
+        while self.running:
+            msg = f"HEARTBEAT {self.peer_name}"
+            try:
+                self.tracker_sock.sendto(msg.encode('utf-8'), (self.tracker_ip, self.tracker_port))
+            except Exception as e:
+                self.logs.append(f"Heartbeat error: {e}")
+
+            time.sleep(5)  # send heartbeat every 5 seconds
 
     def share_file(self):
         """Announces to the tracker that we share a file."""
@@ -197,7 +215,11 @@ class Peer:
                 client_sock, client_addr = self.tcp_server.accept()
             except OSError:
                 break  # socket closed
-            threading.Thread(target=self.handle_single_client, args=(client_sock, client_addr), daemon=True).start()
+            threading.Thread(
+                target=self.handle_single_client,
+                args=(client_sock, client_addr),
+                daemon=True
+            ).start()
 
     def handle_single_client(self, client_sock, client_addr):
         """Handles a single incoming connection for file download."""

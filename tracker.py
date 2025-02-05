@@ -1,6 +1,10 @@
 import socket
 import threading
 import sys
+import time
+
+HEARTBEAT_INTERVAL = 5         # seconds between each tracker check
+HEARTBEAT_TIMEOUT  = 15        # if no heartbeat for 15s, consider peer offline
 
 class Tracker:
     def __init__(self, ip, port):
@@ -12,16 +16,23 @@ class Tracker:
         # files_dict: { filename: set of peer_names_who_have_it }
         self.files_dict = {}
         
-        # peer_info: { peer_name: {'ip': str, 'port': int, 'files': set([...])} }
+        # peer_info: { 
+        #    peer_name: {
+        #       'ip': str, 
+        #       'port': int, 
+        #       'files': set([...]),
+        #       'last_heartbeat': float (timestamp)
+        #    } 
+        # }
         self.peer_info = {}
         
         # Logs
-        self.request_logs = []  # Will store logs of requests, successes, and errors.
+        self.request_logs = []  # Will store logs of requests, successes, errors, etc.
 
         # Create a UDP socket for incoming requests from peers
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind((self.ip, self.port))
-        self.sock.settimeout(1.0)  # So we can break from loop if needed
+        self.sock.settimeout(1.0)  # non-blocking for main loop checks
 
         # Control variable to stop the server
         self.running = True
@@ -30,6 +41,10 @@ class Tracker:
         # Start a thread that continuously listens for UDP messages from peers
         listener_thread = threading.Thread(target=self.listen_for_peers, daemon=True)
         listener_thread.start()
+
+        # Start a thread to periodically check inactive peers
+        monitor_thread = threading.Thread(target=self.monitor_peers, daemon=True)
+        monitor_thread.start()
         
         print(f"[Tracker] Listening on UDP {self.ip}:{self.port}")
         print("[Tracker] Available commands:")
@@ -89,26 +104,36 @@ class Tracker:
             if len(parts) == 4:
                 peer_name, peer_ip, peer_port = parts[1], parts[2], parts[3]
                 self.register_peer(peer_name, peer_ip, int(peer_port))
+
         elif cmd == "SHARE":
             # SHARE <peer_name> <file_name>
             if len(parts) == 3:
                 peer_name, file_name = parts[1], parts[2]
                 self.share_file(peer_name, file_name)
+
         elif cmd == "GET":
             # GET <peer_name> <file_name>
             if len(parts) == 3:
                 peer_name, file_name = parts[1], parts[2]
                 self.handle_get_request(peer_name, file_name, addr)
+
         elif cmd == "SUCCESS_DOWNLOAD":
             # SUCCESS_DOWNLOAD <peer_name> <file_name> <source_peer_name>
             if len(parts) == 4:
                 peer_name, file_name, src_peer = parts[1], parts[2], parts[3]
                 self.handle_success_download(peer_name, file_name, src_peer)
+
         elif cmd == "DISCONNECT":
             # DISCONNECT <peer_name>
             if len(parts) == 2:
                 peer_name = parts[1]
                 self.handle_disconnect(peer_name)
+
+        elif cmd == "HEARTBEAT":
+            # HEARTBEAT <peer_name>
+            if len(parts) == 2:
+                peer_name = parts[1]
+                self.update_heartbeat(peer_name)
         else:
             print(f"[Tracker] Unknown message from {addr}: {message}")
 
@@ -117,7 +142,8 @@ class Tracker:
         self.peer_info[peer_name] = {
             'ip': peer_ip,
             'port': peer_port,
-            'files': set()
+            'files': set(),
+            'last_heartbeat': time.time()  # record the time of registration
         }
         log_entry = f"Peer connected: {peer_name} at {peer_ip}:{peer_port}"
         self.request_logs.append(log_entry)
@@ -158,9 +184,18 @@ class Tracker:
         # Build the response: "FILE_INFO <file_size> seeder1:ip:port seeder2:ip:port ..."
         seeder_info_list = []
         for s in seeders:
-            sip = self.peer_info[s]['ip']
-            sport = self.peer_info[s]['port']
-            seeder_info_list.append(f"{s}:{sip}:{sport}")
+            # Make sure the seeder is still in peer_info (hasn't been removed)
+            if s in self.peer_info:
+                sip = self.peer_info[s]['ip']
+                sport = self.peer_info[s]['port']
+                seeder_info_list.append(f"{s}:{sip}:{sport}")
+
+        if not seeder_info_list:
+            # It might be that all seeders have been removed
+            log_entry = f"No active seeders left for '{file_name}'"
+            self.request_logs.append(log_entry)
+            self.sock.sendto("NO_SEEDERS".encode('utf-8'), addr)
+            return
 
         response = f"FILE_INFO {file_size} " + " ".join(seeder_info_list)
         self.sock.sendto(response.encode('utf-8'), addr)
@@ -195,6 +230,31 @@ class Tracker:
             log_entry = f"Peer disconnected: {peer_name}"
             self.request_logs.append(log_entry)
             print(f"[Tracker] {log_entry}")
+
+    def update_heartbeat(self, peer_name):
+        """Update the 'last_heartbeat' timestamp for a peer who just sent a heartbeat."""
+        if peer_name in self.peer_info:
+            self.peer_info[peer_name]['last_heartbeat'] = time.time()
+            # We can optionally log heartbeats or keep them quiet
+            # self.request_logs.append(f"Heartbeat received from {peer_name}")
+
+    def monitor_peers(self):
+        """Periodically checks if any peer has timed out (no heartbeat)."""
+        while self.running:
+            now = time.time()
+            to_remove = []
+            for p in list(self.peer_info.keys()):
+                last_hb = self.peer_info[p]['last_heartbeat']
+                if now - last_hb > HEARTBEAT_TIMEOUT:
+                    # This peer is considered offline
+                    to_remove.append(p)
+            
+            # Disconnect them
+            for peer_name in to_remove:
+                print(f"[Tracker] Peer {peer_name} timed out (no heartbeat). Removing...")
+                self.handle_disconnect(peer_name)
+            
+            time.sleep(HEARTBEAT_INTERVAL)
 
     # ----- Logging/Display Commands -----
     def show_request_logs(self):
