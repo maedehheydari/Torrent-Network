@@ -1,0 +1,63 @@
+# Setup
+
+# Create Test Files
+echo "This is test file 1" > file1.txt
+echo "This is test file 2" > file2.txt
+echo "This is test file 3" > file3.txt
+
+
+# Start tracker (in terminal 1)
+python3 tracker.py 127.0.0.1:6771
+
+# Peer Operations
+
+# Start Peer1 (Sharing file1.txt) - in terminal 2
+mkdir -p peer1_dir
+cp file1.txt peer1_dir/
+cd peer1_dir
+python3 ../peer.py share file1.txt 127.0.0.1:6771 127.0.0.1:7001 Peer1
+cd ..
+
+# Start Peer2 (Sharing file2.txt) - in terminal 3
+mkdir -p peer2_dir
+cp file2.txt peer2_dir/
+cd peer2_dir
+python3 ../peer.py share file2.txt 127.0.0.1:6771 127.0.0.1:7002 Peer2
+cd ..
+
+# Start Peer3 (Downloading file1.txt) - in terminal 4
+mkdir -p peer3_dir
+cd peer3_dir
+python3 ../peer.py get file1.txt 127.0.0.1:6771 127.0.0.1:7003 Peer3_1
+cd ..
+
+# Test Scenarios
+
+# Test Scenario 1: Peer3 downloading file1.txt from Peer1
+# Already covered by starting Peer3
+
+# Test Scenario 2: Peer3 trying to download a non-existent file - in terminal 5
+cd peer3_dir
+python3 ../peer.py get nonexistent.txt 127.0.0.1:6771 127.0.0.1:7013 Peer3_2
+cd ..
+
+# Test Scenario 3: Peer3 downloading file2.txt from Peer2 - in terminal 6
+cd peer3_dir
+python3 ../peer.py get file2.txt 127.0.0.1:6771 127.0.0.1:7023 Peer3_3
+cd ..
+
+# Test Scenario 4: Peer1 disconnecting
+pkill -f "python3.*Peer1"
+sleep 2
+
+# Test Scenario 5: New download of file1.txt after Peer1 disconnected - in terminal 7
+mkdir -p peer4_dir
+cd peer4_dir
+python3 ../peer.py get file1.txt 127.0.0.1:6771 127.0.0.1:7004 Peer4
+cd ..
+
+# Tracker commands
+request logs
+all-logs
+file_logs file1.txt
+file_logs file2.txt
