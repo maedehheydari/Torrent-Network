@@ -141,7 +141,9 @@ class Peer:
             print(f"[Peer-{self.peer_name}] Invalid tracker response.")
             return
 
-        # file_size = int(parts[1])  # not actually used here, but we read it
+        file_size = int(parts[1])  # Store the file size for progress tracking
+        print(f"[Peer-{self.peer_name}] File size: {file_size} bytes")
+
         seeders_info = parts[2:]
 
         if not seeders_info:
@@ -194,10 +196,13 @@ class Peer:
                     f.write(chunk)
 
             sock.close()
-            self.logs.append(f"Downloaded file '{self.file_name}' from {seeder_name}")
-            print(f"[Peer-{self.peer_name}] Successfully downloaded '{self.file_name}'.")
+            
+            # Get the downloaded file size for logging
+            file_size = os.path.getsize(self.file_name)
+            self.logs.append(f"Downloaded file '{self.file_name}' ({file_size} bytes) from {seeder_name}")
+            print(f"[Peer-{self.peer_name}] Successfully downloaded '{self.file_name}' ({file_size} bytes).")
 
-            # Notify tracker of success
+            # Notify tracker of success (using original protocol)
             msg = f"SUCCESS_DOWNLOAD {self.peer_name} {self.file_name} {seeder_name}"
             self.tracker_sock.sendto(msg.encode('utf-8'), (self.tracker_ip, self.tracker_port))
             self.logs.append(f"SUCCESS_DOWNLOAD sent: {msg}")

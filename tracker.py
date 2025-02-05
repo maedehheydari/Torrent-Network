@@ -16,6 +16,9 @@ class Tracker:
         # files_dict: { filename: set of peer_names_who_have_it }
         self.files_dict = {}
         
+        # Add a new dictionary to store file sizes
+        self.file_sizes = {}  # { filename: size_in_bytes }
+        
         # peer_info: { 
         #    peer_name: {
         #       'ip': str, 
@@ -156,6 +159,7 @@ class Tracker:
         
         if file_name not in self.files_dict:
             self.files_dict[file_name] = set()
+                
         self.files_dict[file_name].add(peer_name)
         self.peer_info[peer_name]['files'].add(file_name)
         
@@ -174,9 +178,8 @@ class Tracker:
 
         # Collect the set of seeders
         seeders = list(self.files_dict[file_name])
-        # For demonstration, we are not reading the file on the tracker side,
-        # so we can just send a dummy file size:
-        file_size = 0
+        # Get the actual file size
+        file_size = self.file_sizes.get(file_name, 0)
 
         log_entry = f"Peer {peer_name} requested '{file_name}', seeders: {seeders}"
         self.request_logs.append(log_entry)
@@ -225,6 +228,9 @@ class Tracker:
                     # If no one seeds this file anymore, remove it entirely
                     if len(self.files_dict[f]) == 0:
                         del self.files_dict[f]
+                        # Also remove from file_sizes if no seeders left
+                        if f in self.file_sizes:
+                            del self.file_sizes[f]
             del self.peer_info[peer_name]
 
             log_entry = f"Peer disconnected: {peer_name}"
